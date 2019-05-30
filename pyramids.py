@@ -11,6 +11,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 import sys
 import matplotlib.pyplot as plt
+import math
  
 #"atalho/train_64x128_H96/pos.lst"
 #"atalho/train_64x128_H96/neg.lst"
@@ -33,12 +34,10 @@ def getAllImages(realpath):
     print("Loading database: "+ path)
     for image_path in image_paths:	#LOOP PARA OBTER IMAGENS .png
         #print(image_path)
-        A = cv2.imread(image_path)
+        A = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
         A = np.float32(A) / 255.0
         #A = np.fromfile(image_path, dtype='int8', sep="")
         #print(A.shape)
-        print A.shape
-        print A.dtype
         #A = A.reshape([28793, -1])
         #A = Image.fromarray(A)
         images.append(A)
@@ -78,50 +77,47 @@ def getPyramids(image, levels=3):
 
     return pyr
 
-def histogramHOG(mag, angle,cellSize):
-    allHistograms = []
-    for index_x in drange(0,mag.shape[0],cellSize): #CALCULA MEDIA E STDEV ENTRE OS PIXELS DE UM BLOCO
-			for index_y in drange(0,mag.shape[1],cellSize):
-				bin = [0,0,0,0,0,0,0,0,0] #0, 20, 40, 60 ... 160
-				for i in range(cellSize):
-					for j in range(cellSize):   
-                        while (angle[index_x+i][index_y+j] >= 180):
-                            angle[index_x+i][index_y+j] -= 180 #este angulo precisa estar entre 0 e 180
-                        
-                        if angle > 0 and angle < 20:
-                            bin[0] = (20 - abs(0 - mag[index_x+i][index_y+j])))/20
-                            bin[1] = (20 - abs(20 - mag[index_x+i][index_y+j])))/20
-                        elif angle > 20 and angle < 40:
-                            bin[1] = (20 - abs(20 - mag[index_x+i][index_y+j])))/20
-                            bin[2] = (20 - abs(40 - mag[index_x+i][index_y+j])))/20
-                        elif angle > 40 and angle < 60:
-                            bin[2] = (20 - abs(40 - mag[index_x+i][index_y+j])))/20
-                            bin[3] = (20 - abs(60 - mag[index_x+i][index_y+j])))/20
-                        elif angle > 60 and angle < 80:
-                            bin[3] = (20 - abs(60 - mag[index_x+i][index_y+j])))/20
-                            bin[4] = (20 - abs(80 - mag[index_x+i][index_y+j])))/20
-                        elif angle > 80 and angle < 100:
-                            bin[4] = (20 - abs(80 - mag[index_x+i][index_y+j])))/20
-                            bin[5] = (20 - abs(100 - mag[index_x+i][index_y+j])))/20
-                        elif angle > 100 and angle < 120:
-                            bin[5] = (20 - abs(100 - mag[index_x+i][index_y+j])))/20
-                            bin[6] = (20 - abs(120 - mag[index_x+i][index_y+j])))/20
-                        elif angle > 120 and angle < 140:
-                            bin[6] = (20 - abs(120 - mag[index_x+i][index_y+j])))/20
-                            bin[7] = (20 - abs(140 - mag[index_x+i][index_y+j])))/20
-                        elif angle > 140 and angle < 160:
-                            bin[7] = (20 - abs(140 - mag[index_x+i][index_y+j])))/20
-                            bin[8] = (20 - abs(180 - mag[index_x+i][index_y+j])))/20
-                        elif angle > 160 and angle < 180:
-                            bin[8] = (20 - abs(160 - mag[index_x+i][index_y+j])))/20
-                            bin[0] = (20 - abs(180 - mag[index_x+i][index_y+j])))/20
-                        
-                        
+def histogramHOG(mag, angle,cellSize=8): #cellsize = 8
+	allHistograms = []
+	bin = []
+	for index_x in drange(0,mag.shape[0],cellSize): #CALCULA MEDIA E STDEV ENTRE OS PIXELS DE UM BLOCO
+		for index_y in drange(0,mag.shape[1],cellSize):
+			bin = [0.0]*9 #0, 20, 40, 60 ... 160 (9 bins)
+			for i in range(cellSize):
+				for j in range(cellSize):
+					angleModified = angle[index_x+i][index_y+j] % 180  #este angulo precisa estar entre 0 e 180
+					firstIndex = int(math.floor(angleModified/20 - 0.5) % 9) #calcula os bins alvo
+					secondIndex =  int(math.ceil(angleModified/20 - 0.5) % 9)
+					proportion =  abs(angleModified/20 -0.5 - int (angleModified/20 -0.5)) #proporcao
+					invProportion = 1 - proportion
+					bin[firstIndex]  += proportion * mag[index_x+i][index_y+j]
+					bin[secondIndex] += invProportion * mag[index_x+i][index_y+j]
+			for k in range(0,9):
+				print bin[k],
+			print
+			print len(bin)
+			allHistograms.append(bin)
+	return allHistograms
+			
 
-				print bin
-                allHistograms.append(bin)
-
-
+def normalizeHistogram(cellByCellHistogramList,sizeHori,sizeVert):
+	normalizedHist = []
+	sizeHori/=8
+	sizeVert/=8
+	count = 0
+	print (sizeHori,sizeVert)
+	for i in range (0,sizeHori-1): 
+		for j in range (0,sizeVert-1):
+			normalizedHist = cellByCellHistogramList[i+j] + cellByCellHistogramList[i+j+1] + cellByCellHistogramList[i+j+sizeHori] + cellByCellHistogramList[i+j+sizeHori+1]
+			#print(i+j,i+j+1)
+			#print(i+j+sizeHori,i+j+sizeHori+1)
+			histogramNorm = np.linalg.norm(normalizedHist) + 0.000001 #epsilon para nao dividir por 0
+			normalizedHist /= histogramNorm
+			count +=1
+	cellSize = 8
+	print count
+	
+	
 
 # construct the argument parser and parse the arguments
 ap = argparse.ArgumentParser()
@@ -137,14 +133,17 @@ images,labels = readDatabase(filePath)
 
 for image in images:
 
-    getPyramids(image)
-    gx = cv2.Sobel(image, cv2.CV_32F, 1, 0, ksize=1)
-    gy = cv2.Sobel(image, cv2.CV_32F, 0, 1, ksize=1)
-    mag, angle = cv2.cartToPolar(gx, gy, angleInDegrees=True)
-    cv2.imshow("Image",mag)
-    cv2.waitKey(1000)
+	getPyramids(image)
+	gx = cv2.Sobel(image, cv2.CV_32F, 1, 0, ksize=1)
+	gy = cv2.Sobel(image, cv2.CV_32F, 0, 1, ksize=1)
+	mag, angle = cv2.cartToPolar(gx, gy, angleInDegrees=True)
+	#cv2.imshow("Image",mag)
+	#cv2.waitKey(1000)
+	cellByCellHistogramList = histogramHOG(mag, angle,8)
+	normalizedFourCellsHistogram = normalizeHistogram(cellByCellHistogramList,mag.shape[0],mag.shape[1])
+	exit(0)
 
-    histogramHOG(mag, angle,8)
+
 #print(images[0])
 # METHOD #1: No smooth, just scaling.
 # loop over the image pyramid
